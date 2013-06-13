@@ -1,0 +1,116 @@
+#!/usr/bin/perl -w 
+use MyGeom;
+use MyMagick;
+use MyUtils;
+use strict ;
+use FileHandle ;
+use Getopt::Long;
+use Cwd ;
+use MyUtils;
+use ConfigPDB;
+use PDB;
+use POSIX ;
+use Algorithm::Combinatorics qw(combinations) ;
+use Math::Geometry ;
+use Math::Geometry::Planar;
+my $polygon = Math::Geometry::Planar->new; 
+   #$contour = Math::Geometry::Planar->new; creates a new contour object;
+
+
+#use Time::HiRes qw( usleep ualarm gettimeofday tv_interval clock_gettime clock_getres  clock);
+use POSIX qw(floor);
+$, = " ";
+my $commandline = util_get_cmdline("",\@ARGV) ;
+my ($infile,$outfile,$which_tech,$display,$listfile,$protein);
+my ($csv,$contourcolor,$color,@expressions,$from,$to,@colornms);
+my $delta = 100000 ;
+my $verbose = 1 ;
+my $NUMITERS = 100 ; 
+GetOptions(
+            "from=s"=>\$from ,
+            "to=s"=>\$to ,
+            "csv=s"=>\$csv ,
+            "protein=s"=>\$protein ,
+            "contourcolor"=>\$contourcolor ,
+            "display"=>\$display ,
+            "infile=s"=>\$infile ,
+            "listfile=s"=>\$listfile ,
+            "color=s"=>\@colornms ,
+            "outfile=s"=>\$outfile ,
+            "expr=s"=>\@expressions,
+            "delta=f"=>\$delta ,
+           );
+die "Dont recognize command line arg @ARGV " if(@ARGV);
+usage( "Need to give a output file name => option -outfile ") if(!defined $outfile);
+#my $ofh = util_write($outfile);
+usage( "Need to give a input file name => option -infile ") if(!defined $infile);
+usage( "Need to give a color => option -color ") if(!@colornms);
+my $ifh = util_read($infile);
+#usage( "Need to give a from -option -from  ") if(!defined $from);
+#usage( "Need to give a to -option -to  ") if(!defined $to);
+usage( "Need to give a csv => option -csv ") if(!defined $csv);
+my $ofhcsv = util_write($csv);
+
+
+my $colornms = util_make_table(\@colornms);
+
+my $image = new MyMagick($infile);
+
+my $w = $image->GetWidth();
+my $h = $image->GetHeight();
+
+print "W = $w H = $h\n";
+
+my $obj = $image->GetObj();
+
+my $RlistF = $image->GetRowInfoContour(0,$colornms);
+my $RlistR = $image->GetRowInfoContour(1,$colornms);
+my ($minX,$minY,$maxY,$maxX,$CminX,$CminY,$CmaxY,$CmaxX,$midX,$midY,$AREACALCBYPIXEL,$insidetable,@allpoints) = $image->GetAllPoints($RlistF,$RlistR);
+
+
+my @list= util_read_list_sentences($listfile);
+my $cnt = 0; 
+foreach my $i (@list){
+	$cnt++ ; 
+	last if($i eq $infile);
+}
+my $MIDCNT = $cnt ;
+my $MID = $list[$cnt];
+
+$cnt = 0 ; 
+foreach my $i (@list){
+	$cnt++ ;
+	next if($i eq $infile);
+	my $dist = abs($MIDCNT - $cnt);
+	my $XX = $dist * $delta ;
+    my $image = new MyMagick($i);
+
+    my $w = $image->GetWidth();
+    my $h = $image->GetHeight();
+
+    my (@blue) = $image->FindCoordsForColor("blue");
+    my (@red) = $image->FindCoordsForColor("red");
+	my $nblue = @blue ;
+	my $nred = @red ;
+    print "W = $w H = $h $dist $MID $MIDCNT $nblue $nred \n";
+	my $found = 0 ; 
+	while(@red){
+		my $x = shift @red ;
+		my $y = shift @red ;
+	    my $D = geom_Distance_2D($midX,$midY,$x,$y);
+		my $ZZ = sqrt($XX*$XX + $D*$D);
+		print "$D $XX $ZZ\n";
+	}
+	die if($found) ;
+}
+
+
+
+sub usage{
+    my ($msg) = @_ ;
+    print $msg , "\n" ;
+print << "ENDOFUSAGE" ; 
+ENDOFUSAGE
+    die ;
+}
+

@@ -1,0 +1,47 @@
+External Tools Required
+	1) apbs
+	2) pdb2pqr
+
+
+Edit setup.csh to set correct paths.
+
+$> source setup.csh
+
+
+
+=========================================================================
+Perl packages to be installed
+=========================================================================
+ConfigPDB.pm:use strict ;
+ConfigPDB.pm:use Carp ;
+ConfigPDB.pm:use FileHandle ;
+ConfigPDB.pm:use Getopt::Long;
+ConfigPDB.pm:use vars qw($AUTOLOAD);
+ConfigPDB.pm:use Getopt::Long;
+ConfigPDB.pm:use File::Basename;
+MyGeom.pm:use Carp ;
+MyGeom.pm:use POSIX ;
+MyGeom.pm:use Algorithm::Combinatorics qw(combinations) ;
+MyGeom.pm:use Math::Geometry ; 
+MyGeom.pm:use strict ;
+MyGeom.pm:use FileHandle ;
+MyGeom.pm:use Getopt::Long;
+MyUtils.pm:use Carp ;
+MyUtils.pm:use POSIX ;
+MyUtils.pm:use Algorithm::Combinatorics qw(combinations) ;
+MyUtils.pm:use Math::NumberCruncher;
+MyUtils.pm:use Math::Geometry ; 
+MyUtils.pm:use strict ;
+MyUtils.pm:use FileHandle ;
+MyUtils.pm:use Getopt::Long;
+PDB.pm:use ConfigPDB;
+PDB.pm:use Algorithm::Combinatorics qw(combinations) ;
+PDB.pm:use Math::Geometry ; 
+PDB.pm:use strict ;
+PDB.pm:use Carp ;
+PDB.pm:use FileHandle ;
+PDB.pm:use Getopt::Long;
+PDB.pm:use vars qw($AUTOLOAD);
+PDB.pm:use Getopt::Long;
+PDB.pm:use Cwd ;
+PDB.pm:use File::Basename;

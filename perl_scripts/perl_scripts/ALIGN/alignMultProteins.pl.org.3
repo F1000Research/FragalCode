@@ -1,0 +1,351 @@
+#!/usr/bin/perl -w 
+use strict ;
+use PDB;
+use FileHandle ;
+use Getopt::Long;
+use Cwd ;
+use MyUtils;
+use ConfigPDB;
+use MyGeom;
+use MyPymol;
+use Math::Geometry ;
+use Math::VectorReal qw(:all);  # Include O X Y Z axis constant vectors
+
+
+
+
+use Time::HiRes qw( usleep ualarm gettimeofday tv_interval clock_gettime clock_getres  clock);
+use POSIX qw(floor);
+my $commandline = util_get_cmdline("",\@ARGV) ;
+my ($config,$p1,$p2,$infile,$outfile,$which_tech,$listfile,$protein);
+my (@expressions);
+my $maxdist = 3 ;
+my $verbose = 1 ;
+my $DISTANCEWITHOUTSEQMATCH = 1 ;
+
+my ($verify,$radii,$before1,$before2);
+GetOptions(
+            "which_tech=s"=>\$which_tech ,
+            "protein=s"=>\$protein ,
+            "verify"=>\$verify ,
+            "p1=s"=>\$p1 ,
+            "p2=s"=>\$p2 ,
+            "infile=s"=>\$infile ,
+            "listfile=s"=>\$listfile ,
+            "outfile=s"=>\$outfile ,
+            "expr=s"=>\@expressions,
+            "maxdist=i"=>\$maxdist ,
+            "config=s"=>\$config,
+            "radii=i"=>\$radii ,
+           );
+die "Dont recognize command line arg @ARGV " if(@ARGV);
+usage( "Need to give a output file name => option -outfile ") if(!defined $outfile);
+usage( "Need to give a config file name => option -config ") if(!defined $config);
+usage( "Need to give a radii file name => option -radii ") if(!defined $radii);
+
+
+my $ofh = util_write($outfile);
+my $ofhclose = util_write("log.close");
+my $CNT = 0 ; 
+my ($RESULTDIR,$PDBDIR,$FASTADIR,$APBSDIR,$FPOCKET,$SRC) = util_SetEnvVars();
+my $PWD = cwd;
+
+die "No proteins specified" if(!@expressions);
+ConfigPDB_Init($config,$ofh);
+
+my @info = util_ReadPdbs($PDBDIR,$APBSDIR,@expressions) ; 
+my @pdbs ;
+foreach my $i (@info){
+	push @pdbs, $i->{PDBOBJ};
+}
+my @atoms = pymolin_getResultsLineAll($infile,@pdbs);
+
+die "Not ssame size" if(@pdbs ne @atoms);
+my $N = @atoms - 1 ; 
+
+my @done;
+foreach my $idx (0..$N){
+	 my $PPP = $pdbs[$idx];
+	 my $atoms1 = $atoms[$idx];
+     my ($DD,$RR) = geom_Align3PointsToXYPlane($PPP,$atoms1,$verbose);
+	 push @done, $DD ;
+}
+
+
+
+my $P1 = $pdbs[0];
+my $D1 = $done[0];
+
+my $P2 = $pdbs[1];
+my $D2 = $done[1];
+
+Match2Proteins($P1,$D1,0,$P2,$D2,1,\@info);
+
+sub MakeMatch{
+	my ($l1,$l2) = @_ ; 
+	my $match = {};
+	my @l1 = @{$l1};
+	my @l2 = @{$l2};
+	my $cnt = 0 ;
+	while($cnt < 3){
+	    $cnt++;
+		my $a = shift @l1 ;
+		my $b = shift @l2 ;
+		my $na = $a->GetResNum(); 
+		my $nb = $b->GetResNum(); 
+		$match->{$na} = $nb;
+	}
+	return $match ;
+
+}
+
+sub Match2Proteins{
+    my ($pdb1,$done1,$idx1,$pdb2,$done2,$idx2,$allinfo) = @_ ; 
+	my @allinfo = @{$allinfo} ; 
+
+	my ($results,$combined) = $pdb1->GetNeighbourHoodAtom($done1,$radii);
+	my $neighresidues ;
+    foreach my $j (@{$combined}){
+		 my $resnum = $j->GetResNum(); 
+		 $neighresidues->{$resnum} = 1;
+	} 
+	my $MATCH = MakeMatch($done1,$done2);
+	my $alreadyadded = {};
+
+    my @neighatoms ; 	
+	foreach my $resnum (keys %{$neighresidues}){
+	     my ($res) = $pdb1->GetResidueIdx($resnum);
+	     my ($type) = $res->PrintSingleLetter($pdb1);
+		 next if(!defined $type);
+		 my $nm = $res->GetName();
+	     my @atoms = ConfigPDB_GetAtoms($nm);
+         my ($atom) = $pdb1->GetAtomFromResidueAndType($resnum,$atoms[0]) ;
+		 if(!defined $atom){
+		 	 next ;
+		 }
+		 push @neighatoms, $atom ;
+	}
+
+	my $info1 = $allinfo[$idx1];
+	my $info2 = $allinfo[$idx2];
+	my $pqr1 = $info1->{PQR} or die ;
+	my $pqr2 = $info2->{PQR} or die ;
+	my $pots1 = $info1->{POTS} or die ;
+	my $pots2 = $info2->{POTS} or die ;
+	my $firstatom1 = $done1->[0];
+	my $firstatom2 = $done2->[0];
+	my $potatom1  = util_GetPotForAtom($firstatom1,$pqr1,$pots1) ;
+	my $potatom2  = util_GetPotForAtom($firstatom2,$pqr2,$pots2) ;
+
+
+    my $done2Res = {};
+    foreach my $i (@{$done2}){
+	    $done2Res->{$i->GetResNum()} = 1 ;
+    }
+
+    my ($absscore,$normalizedSum) = $pdb1->ScoreGivenSetOfAtoms($pdb2,$done1,$done2);
+    print STDERR " ORIGNAL RSMD  : $absscore,$normalizedSum \n";
+
+
+    
+    print STDERR "Doing each neighboring atom\n\n\n";
+    foreach my $i (@neighatoms){
+		my $NNNNN = $i->GetName();
+		my $RESNUMi = $i->GetResNum();
+    
+	    my @tmp1 = (@{$done1}, $i);
+		$i->Print();
+        my $poti = util_GetPotForAtom($i,$pqr1,$pots1) ;
+
+	    print $ofhclose "neighboring Atom\n";
+		print $ofhclose " NEIGH $NNNNN \n";
+
+	    my @atomlist ;
+	    push @atomlist, $i ;
+	    my ($results,$combined) = $pdb2->GetNeighbourHoodAtom(\@atomlist,$maxdist);
+	    print $ofhclose "Atoms close to this one\n";
+	    my $sort ;
+        foreach my $j (@{$combined}){
+		    my $resnum = $j->GetResNum(); 
+	        my $d = $i->Distance($j) ;
+		    $sort->{$j} = $d ;
+	    }
+
+		## sort according to distance
+	    my @sorted = sort { $sort->{$a} <=> $sort->{$b} } (@{$combined});
+    
+    
+	    my $sortrsmd ;
+	    my $locallydone = {};
+		my @processed ; 
+	    foreach my $j (@sorted){
+	        next if(exists $done2Res->{$j->GetResNum()});
+	        next if(exists $locallydone->{$j->GetResNum()} && $verbose == 0);
+	        next if($j->GetResName() =~ /HOH/);
+			push @processed, $j ;
+    
+		    my $resnum = $j->GetResNum(); 
+			my $nmj = $j->GetName();
+    
+		    $locallydone->{$j->GetResNum()} = 1  ; 
+	        my @tmp2 = (@{$done2}, $j);
+		    print $ofhclose "Atom $nmj at  dist = $sort->{$j} \n";
+
+            my ($absscore,$normalizedSum) = $pdb1->ScoreGivenSetOfAtoms($pdb2,\@tmp1,\@tmp2);
+            print $ofhclose " RSMD  : $absscore,$normalizedSum \n";
+			$sortrsmd->{$j} = $normalizedSum ;
+    
+	        print $ofhclose "=============\n\n\n";
+
+	    }
+
+	    my @sortedrsmd = sort { $sortrsmd->{$a} <=> $sortrsmd->{$b} } (@processed);
+		my $added = 0 ;
+	    foreach my $j (@sortedrsmd){
+
+	        next if($j->GetResName() =~ /HOH/);
+	        next if(!OrderSamed($MATCH,$done1,$done2,$i,$j));
+
+			my $nmi = $i->GetName();
+			my $nmj = $j->GetName();
+			my $RESNUMj = $j->GetResNum();
+
+            my $potj = util_GetPotForAtom($j,$pqr2,$pots2) ;
+			my $diff1 = int($potatom1 - $poti );
+			my $diff2 = int($potatom2 - $potj );
+			my $diff = $diff1 - $diff2 ;
+			my $RSMD = $sortrsmd->{$j};
+			my $DIST = $sort->{$j};
+	        my $DIstancefromfirst=  $firstatom1->Distance($i) ;
+			if(!$added && abs($diff) < 150 && !exists $alreadyadded->{$RESNUMj}){
+				$MATCH->{$RESNUMi} = $RESNUMj;
+				$alreadyadded->{$RESNUMj} = 1 ;
+				$added = 1 ; 
+
+			}
+			print $ofhclose "Sorted XXX $nmi,$nmj : realdiff =$diff diffi=$diff1  diffj=$diff2  DIstancefromfirst= $DIstancefromfirst DISTfromatom=$DIST RSMD=$RSMD \n";
+		}
+
+
+		if(!$added){
+
+			## without potential congruence 
+	        foreach my $j (@sortedrsmd){
+	            next if($j->GetResName() =~ /HOH/);
+	            next if(!OrderSamed($MATCH,$done1,$done2,$i,$j));
+    
+			    my $RESNUMj = $j->GetResNum();
+				if(!exists $alreadyadded->{$RESNUMj}){
+				   $MATCH->{$RESNUMi} = $RESNUMj . "-" ;
+				   $alreadyadded->{$RESNUMj} = 1 ;
+				   last ;
+				}
+			}
+			
+			#without sequencematch
+	        foreach my $j (@sortedrsmd){
+	            next if($j->GetResName() =~ /HOH/);
+	            #next if(!OrderSamed($done1,$done2,$i,$j));
+    
+			    my $RESNUMj = $j->GetResNum();
+				if(!exists $alreadyadded->{$RESNUMj}){
+				   my $DDD = $j->Distance($i);
+				   if($DDD < $DISTANCEWITHOUTSEQMATCH){
+				       $MATCH->{$RESNUMi} = $RESNUMj . "x";
+				       $alreadyadded->{$RESNUMj} = 1 ;
+				       last ;
+				   }
+				}
+			}
+
+			$MATCH->{$RESNUMi} = "-" if(!exists $MATCH->{$RESNUMi});
+		}
+
+
+	    print $ofhclose "=============\n\n\n";
+   }
+
+	PrintMatch($MATCH,"best");
+
+}
+
+sub OrderSamed{
+    my ($match,$done1,$done2,$i,$j) = @_ ; 
+	my $iNum = $i->GetResNum();
+	my $jNum = $j->GetResNum();
+
+	my ($orderedRes1,$orderedRes2,$cnt1,$cnt2);
+    foreach my $X (@{$done1}){
+	    $orderedRes1->{$X->GetResNum()} = 1 ;
+    }
+    foreach my $X (@{$done2}){
+	    $orderedRes2->{$X->GetResNum()} = 1 ;
+    }
+	$cnt1 = $cnt2 = 0 ;  
+	foreach my $X (sort {$a <=> $b}  keys %{$orderedRes1}){
+		last if($iNum < $X);
+		$cnt1++ ;
+	}
+	foreach my $X (sort {$a <=> $b} keys %{$orderedRes2}){
+		if($jNum < $X){
+			last ;
+		}
+		$cnt2++ ;
+	}
+	#die "$cnt1 $cnt2 ";
+	if($cnt1 eq $cnt2){
+		return 1 ;
+	}
+	return 0 ;
+}
+
+
+my @outfiles ; 
+foreach my $i (@expressions){
+   my $outfile1 = "$i.rotated.pdb";
+   push @outfiles, $outfile1 ;
+}
+
+foreach my $idx (0..$N){
+	my $pdb1 = $pdbs[$idx]; 
+	my $outfile1 = $outfiles[$idx];
+    $pdb1->WritePDB($outfile1,1);
+}
+
+
+my $outpymol = "XXX.p1m";
+my $outpymolfh = util_write($outpymol);
+util_PrintPymolWithAllProteins($outpymolfh,\@outfiles,\@atoms);
+
+util_Banner("Wrote pymol file in $outpymol");
+
+
+print STDERR "Output written in $outfile\n";
+
+
+chmod 0777, $outfile ;
+sub usage{
+    my ($msg) = @_ ;
+    print $msg , "\n" ; 
+print << "ENDOFUSAGE" ; 
+ENDOFUSAGE
+    die ;
+}
+
+
+sub PrintMatch{
+   my ($MATCH,$str) = @_ ; 
+   my @a ;
+   my @b ;
+   $, = " , ";
+   print STDERR "==========Printing match $str===================\n";
+   foreach my $i (sort {$a <=> $b} keys %{$MATCH}){
+   	   my $j = $MATCH->{$i} ; 
+	   push @a , $i ;
+	   push @b , $j ;
+	   print STDERR "$str $i = $j\n";
+   }
+   #print STDERR "$str @a \n";
+   #print STDERR "$str @b \n";
+   print STDERR "=============================\n";
+}
